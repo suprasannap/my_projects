@@ -1,0 +1,681 @@
+---
+title: "Titanic-Prediction"
+author: "Suprasanna Pradhan"
+date: "10 December 2018"
+output:
+  html_document: default
+  word_document: default
+---
+#Introduction
+This analysis attempts to predicate the probability for survival of the Titanic passengers. 
+In order to do this, I will use the different features available about the passengers, use a subset of the data to train an algorithm and then run the algorithm on the rest of the data set to get a prediction.
+
+We will try out the following algorithms:
+
+Logistic Regression
+Decision tree - CART
+Random Forest
+Naive Bayes and mlr 
+Bagging
+XGBoost
+K-Fold Cross Validation
+
+#Load packages
+
+Here we will load all the necessary packages that we will use during our analyses.
+
+```{r}
+#Loading required packages
+#install.packages("tidyverse")
+#library(tidyverse)
+library(ggplot2)
+library(caret)
+library(caretEnsemble)
+library(psych)
+library(Amelia)
+library(mice)
+library(GGally)
+library(gutenbergr)
+library(tidytext)
+library(dplyr)
+library(janeaustenr)
+library(stringi)
+library(tidyr)
+library(rpart)
+library(randomForest)
+
+```
+# Importing the data 
+```{r}
+setwd ("C:/Users/SuprasannaPradhan/Documents/My Files/R/R project files/Titanic")
+getwd()
+t.test<- read.table("test.csv", sep = ",", header = T)
+t.train <- read.table("train.csv", sep = ",", header = T)
+str(t.train)
+
+```
+The train data set is consist of 891 observation with 12 variables
+
+```{r}
+str(t.test)
+```
+
+Test data set having 418 observation and 11 variables
+
+Since the datasets are given seperately as trained and tested data, they will be kept as it is. The thing that needed to be done is to merge the actual survival outcome of passengers from tested data with other information in that dataset. The column of survival outcome (dependent variable) is merged with the rest of the independent variables/features of the passegers from the tested dataset by passengerId. The trained dataset contains 891 observations (passenger information) and 12 features (information of passengers), and the tested dataset contains 418 observations
+
+
+
+```{r}
+summary(t.train)
+```
+
+```{r}
+describe(t.train)
+```
+
+```{r}
+table(t.train$Survived)
+prop.table(table(t.train$Survived))*100
+```
+We got 61% is zero and 38% for 1 
+
+```{r}
+
+##Checking Data ##
+names(t.train)
+#visualize the missing data
+missmap(t.train)
+sum(is.na(t.train))
+
+missmap(t.test)
+sum(is.na(t.test))
+```
+```{r}
+colSums(is.na(t.train))
+```
+We got 177 missing values in age only 
+
+
+```{r}
+t.train[is.na(t.train)]<- 0
+sum(is.na(t.train))
+
+t.test[is.na(t.test)]<- 0
+sum(is.na(t.test))
+```
+
+
+There are some missing value  in Age,these missing values may have any impact on passenger class and gender, we have to check it.
+```{r}
+library(dplyr)
+t.train$Survived = as.factor(t.train$Survived)
+```
+
+We have created some more variables for EDA like Agegroup and family size 
+```{r}
+titanic.train1<-t.train%>% mutate(AgeGroup=as.factor(findInterval(Age,c(0,18,35,100))))
+titanic.train1$Gender<-ifelse(titanic.train1$Sex=="male",1,0)
+titanic.train1$NF <- titanic.train1$SibSp+titanic.train1$Parch+1
+t.test$Gender<-ifelse(t.test$Sex=="male",1,0)
+t.test$NF <-t.test$SibSp+t.test$Parch+1
+
+
+```
+# Adding title is addtional variable
+```{r}
+titanic.train1$Title <- gsub('(.*, )|(\\..*)', '', titanic.train1$Name)
+titanic.train1$Title[titanic.train1$Title == 'Mlle']<- 'Miss' 
+titanic.train1$Title[titanic.train1$Title == 'Ms']<- 'Miss'
+titanic.train1$Title[titanic.train1$Title == 'Mme']<- 'Mrs' 
+titanic.train1$Title[titanic.train1$Title == 'Lady']<- 'Miss'
+titanic.train1$Title[titanic.train1$Title == 'Dona']<- 'Miss'
+officer<- c('Capt','Col','Don','Dr','Jonkheer','Major','Rev','Sir','the Countess')
+titanic.train1$Title[titanic.train1$Title %in% officer]<-'Officer'
+titanic.train1$Title<- as.factor(titanic.train1$Title)
+```
+
+#Summary 
+```{r}
+summary(titanic.train1[-4])
+str(titanic.train1)
+```
+
+
+#Exploratory Data Analysis
+
+
+## Age group wise passengers
+```{r}
+table(titanic.train1$AgeGroup)
+ag <-ggplot(data = titanic.train1,aes(x=AgeGroup,fill=Survived))+geom_bar(position="fill")+ylab("Frequency")
+ag + theme_bw()
+```
+We found maximum are Passenger belongs to second category of age
+
+##Survived by Age
+```{r}
+library(ggplot2)
+library(dplyr)
+ggplot(titanic.train1,aes(x=Age, colour=Survived)) +
+  geom_freqpoly(binwidth =1)+ labs(title="Age Distribution by Survived")
+```
+
+
+##Passengers class wise survived 
+```{r}
+c <-ggplot(data = titanic.train1,aes(x=Pclass,fill=Survived))+geom_bar(position="fill")+ylab("Frequency")
+c + theme_bw()
+```
+
+##Survived by Gender
+```{r}
+s <-ggplot(data=titanic.train1,aes(x=Sex,fill=Survived))+geom_bar()
+s + theme_bw()
+
+
+```
+##Survived by SibSP
+
+```{r}
+d <- ggplot(titanic.train1, aes(x=SibSp, fill=Survived, color=Survived)) +
+  geom_histogram(binwidth = 1) + labs(title="SibSp Distribution by Survived")
+d + theme_bw()
+```
+
+##Survived by Parch
+```{r}
+ggplot(titanic.train1, aes(Parch, colour = Survived)) +
+  geom_freqpoly(binwidth = 1) + labs(title="Parch Distribution by Survived")
+```
+##Survivals by Embarked:
+```{r}
+em <-ggplot(data = titanic.train1,aes(x=Embarked,fill=Survived))+geom_bar(position="fill")+ylab("Frequency")
+em + theme_bw()
+```
+
+##Survived by Embarked
+```{r}
+ep<-ggplot(data = titanic.train1,aes(x=Embarked,fill=Survived))+geom_bar(position="fill")+facet_wrap(~Pclass)
+ep + theme_bw()
+```
+##Survived by Family size#
+```{r}
+
+nf<- ggplot(titanic.train1,aes(x=NF,fill= Survived, color= Survived)) +
+  geom_histogram(binwidth = 1) + labs(title="survived by NF")
+nf + theme_bw()
+
+```
+##Survived by Fare
+```{r}
+
+ff<- ggplot(titanic.train1,aes(x=Fare,fill= Survived, color= Survived)) +
+  geom_histogram(binwidth = 20) + labs(title="survived by Fare")
+ff + theme_bw()
+```
+##Survived by Titles
+```{r}
+
+nt<- ggplot(data = titanic.train1,aes(x=Title,fill=Survived))+geom_bar(position="fill")+ylab("Frequency")
+nt + theme_bw()
+```
+
+
+##visual of ggpair plot
+```{r}
+library(dplyr)
+titanic.train2 <- titanic.train1 %>% select (-Name,-Ticket,-Cabin,-PassengerId,-Sex)
+#ggpairs(titanic.train2)
+
+```
+
+
+##Chi suquar Testing 
+We check here  with all variable with "Survived" about the null and alternative hypothesis (If p value is < 5 then null is true in our case )
+
+```{r}
+tab1 <- table(titanic.train1$AgeGroup,titanic.train1$Survived)
+tab1
+chisq.test(tab1)
+```
+
+```{r}
+
+tab2 <- table(titanic.train1$Sex,titanic.train1$Survived)
+tab2
+chisq.test(tab2)
+
+```
+
+```{r}
+
+tab3 <- table(titanic.train1$Pclass,titanic.train1$Survived)
+tab3
+chisq.test(tab3)
+```
+
+
+```{r}
+
+tab4<- table(titanic.train1$SibSp,titanic.train1$Survived)
+tab4
+chisq.test(tab4)
+```
+
+```{r}
+
+tab5 <- table(titanic.train1$Parch,titanic.train1$Survived)
+tab5
+chisq.test(tab5)
+```
+##Checking cor plot
+```{r}
+str(titanic.train1)
+titanic.train_dt= subset(titanic.train1, select = c(3,6:8,10,14:15))
+titanic.train_dt = as.data.frame(titanic.train_dt)
+titanic.train1_cor= cor(titanic.train_dt)
+str(titanic.train1_cor)
+```
+##Plotting Corrplot
+```{r}
+library(corrplot)
+corrplot(titanic.train1_cor, type="upper", method="number")
+
+```
+## Check the final data for modelling
+```{r}
+str(titanic.train1)
+```
+We have considered only Passenger calss ,Age,Sibsp,Parch and Gender for further anlysis 
+
+# Model Planning and Building 
+
+##Logit Model
+Since the dependent variable is binary  and we  need check the multicollinearity of the variable  before preparing the final model of logistic regression. We found five variables are carried out  good coefficient and allof them are negative coefficient.
+
+Further we have redefined the model to perform better 
+
+Here we have Performed the initial regression and later on we have redefined the data set after doing these steps 
+1.	Find out all significant variables.
+2.	Remove non-performing variables from the module 
+3.	Check multicollinearity with VIF function and rebuild the module
+
+```{r}
+titanic_lg<-glm(Survived ~ .,data = titanic.train1[-c(4,9,11)], family = "binomial"(link="logit"))
+summary(titanic_lg) 
+```
+The initial regression we have chekced with all varaibles where we found Pclass,SibSp,TitleMrand TitleOfficer 
+
+## Checking only with significian varibales
+```{r}
+train_fd <- subset(titanic.train1,select= -c(4,5,9:13,15:16))
+test_fd <- subset(t.test,select= -c(3,4,8:11,13))
+str(train_fd)
+```
+##Revised Logit model
+```{r}
+titanic_lg1<-glm(Survived ~ .,data = train_fd[-1], family = "binomial"(link="logit"))
+summary(titanic_lg1) 
+```
+##Check Multi-Collinearity Effect: 
+```{r}
+library(car)
+#( VIF = 1 - Not Correlated # VIF > 1 < 5 - Moderately Correlated # VIF > 5- Highly Correlated)
+vif(titanic_lg1)
+```
+
+
+Predction of train data 
+```{r}
+pred_train = predict.glm(titanic_lg1,newdata=train_fd,type="response")
+train.lg <- table(train_fd$Survived,pred_train>0.5)
+train.lg
+accuracy.lg= sum(diag(train.lg))/sum(train.lg)
+accuracy.lg
+
+```
+
+#Model Performance Measure - Confusion Matrix 
+
+##Checking train data AUC
+```{r}
+library(ROCR)
+DTpredROC1 = ROCR::prediction(pred_train, train_fd$Survived)
+perf1 = performance(DTpredROC1, "tpr", "fpr")
+plot(perf1)
+
+```
+##AUC
+```{r}
+Auc <- as.numeric(performance(DTpredROC1, "auc")@y.values)
+Auc
+```
+
+##KS
+```{r}
+KS1 <- max(attr(perf1, 'y.values')[[1]]-attr(perf1, 'x.values')[[1]])
+KS1
+```
+
+##Gini
+```{r}
+## Gini Coefficient
+library(ineq)
+gini1 = ineq(train_fd$Survived, type="Gini")
+gini1
+
+```
+
+
+
+##Predcting of test data 
+```{r}
+pred_test = predict.glm(titanic_lg1,newdata=t.test,type="response")
+head(pred_test) 
+```
+
+
+##Merging with test data
+```{r}
+test_lg <-ifelse(pred_test>0.5,1,0)
+#View(test_fd)
+output_lg<- cbind(test_fd[1],test_lg )
+View(output_lg)
+colnames(output_lg)[2] <- "Survived"
+View(test_fd)
+```
+
+
+##Classification and Regression Tree
+CART method has enabled us to determine the complex interactions among variables in the final tree, in contrast to identifying and defining the interactions in a multivariable logistic regression model. 
+
+
+```{r}
+#CART Model
+library(rpart)
+library(rpart.plot)
+r.ctrl = rpart.control(minsplit = 100, minbucket = 10, cp = 0, xval = 10)
+CT_model = rpart(Survived ~ ., data = train_fd, method = "class", control = r.ctrl)
+CT_model
+rpart.plot(CT_model)
+```
+
+```{r}
+attributes(CT_model)
+CT_model$cptable
+
+```
+##Pruning the tree 
+```{r}
+ptree = prune(CT_model, .035, "CP")
+ptree
+rpart.plot(ptree)
+CT_model$variable.importance
+```
+##CART validation data
+```{r}
+str(test_fd)
+predTrain = predict(ptree, newdata = train_fd)
+pred_class = predict(ptree, newdata = train_fd[,-2], type = "class")
+predDT = predict(ptree, newdata = test_fd[,-7], type = "prob")
+predDT_cl = predict(ptree, newdata = test_fd[,-7], type = "class")
+#predDT = predict(ptree, newdata = t.test)
+
+```
+
+##Validation on train data
+```{r}
+library(ROCR)
+DTpredROC_CT = prediction(predTrain [,2], titanic.train1$Survived)
+perf2 =performance(DTpredROC_CT, "tpr", "fpr")
+plot(perf2)
+Auc <- as.numeric(performance(DTpredROC_CT, "auc")@y.values)
+Auc
+table(titanic.train1$Survived, pred_class)
+accuracy.ct= (468+233)/(468+233+81+109)
+accuracy.ct
+```
+
+
+
+##Predcting with test data
+```{r}
+output_cart<- cbind(test_fd[1],predDT_cl )
+View(output_cart)
+colnames(output_cart)[2] <- "Survived"
+```
+
+```{r}
+str(titanic.train1)
+train__rf <- subset (titanic.train1,select = c(4))
+
+```
+
+
+##Random Forest 
+RF  we have used  because  its tree-based strategies naturally it ranks by how well the model improve the purity of the node. This mean decrease in impurity over all trees (called Gini impurity)and It reduces the complexity of a model and makes it easier to interpret.
+```{r}
+library(randomForest) 
+seed=101
+set.seed(seed)
+RF_model = randomForest(Survived ~ ., data = train_fd, mtry = 3, nodesize =10, ntree =501, importance = TRUE)
+print(RF_model)
+```
+In above we got 16.95% is out of bag 
+
+
+##ploting RF moden
+```{r}                                                                                    
+plot(RF_model, main="")        
+legend("topright", c("OOB", "0", "1"), text.col=1:6, lty=1:3, col=1:3)
+title(main="Error Rates Random Forest train_data")
+```
+Non survied are having greater accuracy .
+
+
+
+##Checking OOB
+```{r} 
+rf_err_rate <-  as.data.frame(RF_model$err.rate)
+rf_err_rate$ID <- seq.int(nrow(rf_err_rate)) 
+rf_err_rate[which(rf_err_rate$OOB==min(rf_err_rate$OOB)),] 
+min_tree<-min(rf_err_rate[which(rf_err_rate$OOB==min(rf_err_rate$OOB)),]$ID) 
+```
+
+## List the importance of the variables
+
+```{r}
+## List the importance of the variables.
+impVar <- round(randomForest::importance(RF_model), 2)
+impVar[order(impVar[,3],decreasing = TRUE),]
+```
+#Variable Importance: Graphical representation 
+```{r}
+varImpPlot(RF_model) 
+```
+
+##Checking Accuracy of train data 
+```{r}
+#Pass the Test data through RF model
+predRF = predict(RF_model, newdata = train_fd, type="class")
+predRF1 = predict(RF_model, newdata = train_fd, type="prob")
+#Check model performance using confusion matrix
+table(train_fd$Survived, predRF)
+accuracy.rf=(519+270)/(519+270+30+72)
+accuracy.rf
+```
+##Validating with test  data 
+```{r}
+predRF_test = predict(RF_model, newdata = test_fd[-7], type="class")
+predRF1_test = predict(RF_model, newdata = test_fd[-7], type="prob")
+```
+#Predicting wit test data 
+```{r}
+output_RF<- cbind(test_fd[1],predRF_test )
+View(output_RF)
+colnames(output_RF)[2] <- "Survived"
+write.csv(output_RF,"titanic_kaggle_submission.csv",row.names = FALSE)
+```
+
+
+
+
+#Machine learning approach
+##Naive Bayes
+We have used Naive Bayes classifiers because Naive Bayes classifiers are a collection of classification algorithms based on Bayes' Theorem. It is not a single algorithm but a family of algorithms where all of them share a common principle, i.e. every pair of features being classified is independent of each other.
+Naive Bayes learners and classifiers can be extremely fast compared to more sophisticated methods. The decoupling of the class conditional feature distributions means that each distribution can be independently estimated as a one-dimensional distribution. This in turn helps to alleviate problems stemming from the curse of dimensionality.
+
+```{r}
+#naive bayes
+library(e1071)
+library(caret)
+train_fd$Survived = as.factor(train_fd$Survived)
+NB = naiveBayes(x =train_fd[-2], y =train_fd$Survived) 
+pred.train.NB = predict(NB, newdata =train_fd[-2])
+tab.NB =table(train_fd[,2], pred.train.NB)
+accuracy.nb = sum(diag(tab.NB))/sum(tab.NB)
+accuracy.nb
+
+```
+
+##Clasifiying all variable with Survived - using NaiveBays classifer
+```{r}
+names(titanic.train1)
+library(dplyr)
+titanic.train3 <- titanic.train1 %>% select (-Name,-Ticket,-Cabin,-PassengerId,-Sex)
+str(titanic.train3)
+#install.packages(mlr)
+library(mlr)
+#Create a classification task for learning on training data Data set and specify Survived feature
+task = makeClassifTask(data =titanic.train3,target = "Survived")
+#Initialize the Naive Bayes classifier
+selected_model = makeLearner("classif.naiveBayes")
+#Train the model
+NB_mlr = train(selected_model, task)
+#Read the model learned  
+NB_mlr$learner.model
+
+```
+
+##Confusion matrix to check accuracy
+
+```{r}
+predictions_mlr = as.data.frame(predict(NB_mlr, newdata = titanic.train3[,2:10]))
+
+table(predictions_mlr[,1],titanic.train3$Survived)
+
+accuracy.nb_mlr= (452+247)/(452+247+95+97)
+accuracy.nb_mlr
+```
+
+
+
+##Bagging
+Bootstrapping is a sampling technique in which we create subsets of observations from the original dataset, with replacement. The size of the subsets is the same as the size of the original set.
+Bagging (or Bootstrap Aggregating) technique uses these subsets (bags) to get a fair idea of the distribution (complete set). The size of subsets created for bagging may be less than the original set.
+.	Multiple subsets are created from the original dataset, selecting observations with replacement. 
+.	A base model (weak model) is created on each of these subsets. 
+.	The models run in parallel and are independent of each other. 
+.	The final predictions are determined by combining the predictions from all the models.
+
+```{r}
+#Bagging#
+library(gbm)          
+#install.packages('xgboost')
+library(xgboost)      
+#install.packages('caret')
+library(caret)        
+library(ipred)
+library(rpart)
+
+titanic_bagging <- bagging(Survived ~.,data=train_fd,
+                         control=rpart.control(maxdepth=5, minsplit=4))
+
+pred_class <- predict(titanic_bagging, train_fd)
+
+tab.bg <- table(train_fd$Survived,pred_class)
+accuracy.bg = sum(diag(tab.bg))/sum(tab.bg)
+accuracy.bg
+
+```     
+
+##XGBoost 
+XGBoost (extreme Gradient Boosting) is an advanced implementation of the gradient boosting algorithm. XGBoost has proved to be a highly effective ML algorithm, extensively used in machine learning competitions and hackathons.
+XGBoost has high predictive power and is almost 10 times faster than the other gradient boosting techniques. It also includes a variety of regularization which reduces overfitting and improves overall performance. Hence it is also known as 'regularized boosting' technique.
+```{r}
+# XGBoost 
+#install.packages('xgboost')
+library(xgboost)
+set.seed(123)
+classifier = xgboost(data = as.matrix(train_fd[,-2]), label = train_fd$Survived, nrounds = 10)
+#Predicting the Test set results
+y_pred <- predict(classifier, newdata = as.matrix(train_fd[-2]))
+y_pred = (y_pred >= 0.5)
+
+# Making the Confusion Matrix
+cm = table(train_fd$Survived, y_pred)
+cm
+accuracy.bs = sum(diag(cm))/sum(cm)
+accuracy.bs
+
+```   
+
+## K-Fold Cross Validation
+We know ,in the K-fold cross-validation method, the dataset is divided into k subsets, and the holdout method is repeated k times. Each time, one of the k subsets is used as the test set and the remaining k 1 subsets are put together to form a training set. The average error across all k trials is then calculated. 
+The advantage of this method is that every data point has one chance to be in a test set exactly once and has the chance to be in a training set k 1 times. 
+The variance of the resulting estimate is reduced as k is increased. 
+The disadvantage of this method is that it suffers from heavy computational complexity, because the training algorithm has to be rerun from scratch k times, so it takes k times as much computation to make an evaluation.
+For our data set we have created 10 CV folds
+```{r}
+library(caret)
+folds_titanic = createFolds(train_fd$Survived, k =10)
+cv = lapply(folds_titanic, function(x) {
+tr_fold = train_fd[-x, ]
+tt_fold = train_fd[x, ]
+classifier = xgboost(data = as.matrix(train_fd[-2]), label = train_fd$Survived, nrounds = 10)
+y_pred = predict(classifier, newdata = as.matrix(tt_fold[-2]))
+y_pred = (y_pred >= 0.5)
+cmx= table(tt_fold[,2], y_pred)
+accuracy = (cmx[1,1] + cmx[2,1])  / (cmx[1,1] + cmx[2,1] + cmx[1,1] + cmx[2,1])
+return(accuracy)
+})
+accuracy.kf = mean(as.numeric(cv))
+accuracy.kf
+```      
+
+
+
+
+
+
+
+# Summary of Accuracy
+
+```{r}
+#Accuracy of Logistic Regression 				
+accuracy.lg
+#Accuracy of CART
+accuracy.ct
+#Accuracy of Random Forest 
+accuracy.rf
+#Accuracy of Naive Bayes 
+accuracy.nb
+#Accuracy of Bagging 
+accuracy.bg
+#Accuracy of XBoost
+accuracy.bs
+#Accuracy of KNN cross folding 
+accuracy.kf
+```
+##Submission csv
+```{r}
+write.csv(output_RF,"titanic_kaggle_submission.csv",row.names = FALSE)
+```
+
+
+# Conclusion 
+The best models are Random forest , by which we predicted with 88 % accuracy, whether passenger is survived or not . Whereas Bagging method can 85% accuracy .
+Age group third ( more than 35) , belongs to passenger class 1 and married female with earmarked "c" might had more probability to be  survived
+
+Thank you for your precious time , If you like it please upvote
