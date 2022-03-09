@@ -1,0 +1,1054 @@
+---
+title: "WSMA Project"
+author: "Suprasanna Pradhan"
+date: "31 August 2019"
+output:
+  pdf_document:
+    keep_tex: yes
+    number_sections: yes
+    toc: yes
+  html_document: default
+  word_document: default
+---
+#1. Project Objective and Scope 
+
+##1.1 Objective 
+Shark Tank - the reality show where entrepreneurs pitch ideas to a panel of celebrity 
+A dataset of Shark Tank episodes is made available. It contains 495 entrepreneurs making their pitch to the VC sharks. 
+We will only use "Description" column for the initial text mining exercise.
+
+Looking back at all of this got us curious: clasifying Shark deal? Are certain deals bheaviour more likely to make deals than others? What types of products are the most successful historically and recored in the description ? Which sharks dealthrow down the largest ration.
+
+##1.2 Scope 
+Using multiple algorithms, we will predict given the description of new pitch, how likely is the pitch will convert into success or not.
+
+
+```{r}
+library(dplyr)
+library(tm)
+library(wordcloud)
+library(plotrix)
+library(dendextend)
+library(ggplot2)
+library(ggthemes)
+library(reshape2)
+library(quanteda)
+library(stringr)
+library(tidytext)
+library(tidyr)
+library(SnowballC)
+library(irlba)
+library(caret)
+library(RColorBrewer)
+library(biclust)
+library(igraph)
+library(fpc)
+
+
+```
+
+#2. Project Approach 
+
+A typical Development Lifecycle can be adopted for this assignment, as follows: 
+1. Discovery and data cleaning
+2. Data Preparation 
+3. Planning of Model 
+4. Building of Model 
+5. Final Results. 
+
+
+
+
+
+## 2.1. Discovery and data cleaning
+###Import Dataset
+
+
+```{r}
+#Importing Data set
+setwd("C:/Users/SuprasannaPradhan/Documents/My Files/Great Lakes Projects")
+Shark=read.csv("S_T_Companies.csv",stringsAsFactors = FALSE)
+names(Shark)
+str(Shark)
+table(Shark$deal)
+```
+Above we got 495 observations with 19 variables, here we are going use only deal and desrcipaiton  colmuon for text analyis 
+Deal contains class of true and flase ,where 244 flase and 251 trues observations
+
+### Create corpus
+Further we  need to transform dataset into a corpus with required variable i.e. description. Next we normalize the texts in the reviews:
+1. Switch to lower case
+2. Remove punctuation marks and stopwords
+3. Remove extra whitespaces
+4. Stem the documents
+```{r}
+#Make a vector source and a corpus
+Shark_corpus=Corpus(VectorSource(Shark$description))
+```
+
+###Clean the corpus and convert all text to lower case
+###remove numbers$punctuatio$stop words
+```{r}
+#clean the corpus and convert all text to lower case
+Shark_clean_corpus = tm_map(Shark_corpus, tolower)
+#remove numbers
+Shark_clean_corpus = tm_map(Shark_clean_corpus,removeNumbers) 
+# remove punctuation
+Shark_clean_corpus = tm_map(Shark_clean_corpus,removePunctuation) 
+# remove whitespace
+Shark_clean_corpus = tm_map(Shark_clean_corpus,stripWhitespace)
+# remove stop words
+Shark_clean_corpus = tm_map(Shark_clean_corpus, removeWords, stopwords('en')) 
+# Remove context specific stop words
+Shark_clean_corpus=tm_map(Shark_clean_corpus, removeWords,c("also", "get","like", "company", "made", "can", "im", "dress", "just", "i","3d"))
+# stemming
+Shark_clean_corpus = tm_map(Shark_clean_corpus, stemDocument) 
+Shark_clean_corpus
+
+```
+# Creat word cloud
+
+```{r}
+wordcloud(Shark_clean_corpus, min.freq =10)
+wordcloud(Shark_clean_corpus, min.freq =10, color = brewer.pal(8, "Set2"), random.order=F, rot.per=.30)
+wordcloud(Shark_clean_corpus, min.freq =10, color = brewer.pal(8, "Set2"), random.order=F, rot.per=.30)
+```
+Above observation we found "make"" is the most frequest word has been appred several time 
+
+
+
+###Sentiment Analysis
+```{r}
+#Sentimentr#
+library(sentimentr)
+library(syuzhet)
+library(ggplot2)
+txt1 = gsub("(|via)((?:\\b\\W*@\\w+)+)", " ", Shark_corpus)
+#Remove RT text etc
+txt2 = gsub("http[^[:blank:]]+", " ", txt1)         
+#Remove html 
+txt3 = gsub("@\\w+", "", txt2)                      
+#Remove names
+txt4 = gsub("[[:punct:]]", " ", txt3)
+txt5 = gsub("[^[:alnum:]]", " ", txt4)
+
+```
+We have removed all unnecessary words and letter whihc is notrequried for our anlysis 
+```{r}
+IXRsentiment = get_nrc_sentiment(txt5)
+SentimentScore = data.frame(colSums(IXRsentiment[,]))
+names(SentimentScore) = "Score"
+SentimentScore = cbind("sentiment" = rownames(SentimentScore), SentimentScore)
+rownames(SentimentScore) = NULL
+ggplot(data = SentimentScore, aes(x = sentiment, y = Score))+
+  geom_bar(aes(fill=sentiment), stat = "identity") +
+  theme(legend.position = "none") +
+  xlab("Sentiment") + ylab("Score") + ggtitle("Sentiment Score Shark")
+
+```
+###Genrate a document term matrix and finding association s
+DTM (Document-Term Matrix):the documents as rows, terms/words as columns, frequency of the term in the document. This will help us identify unique words in the corpus used frequently.
+```{r}
+# Genrate a document term matrix
+DTM =DocumentTermMatrix(Shark_clean_corpus)
+DTM
+#findFreqTerms(DTM, lowfreq=5)
+findFreqTerms(DTM, lowfreq=10)
+findAssocs(DTM, "make",0.25)
+
+
+```
+```{r}
+m = as.matrix(DTM)
+v = sort(rowSums(m),decreasing=TRUE)
+d = data.frame(word = names(v),freq=v)
+head(d,10)
+
+```
+In above since words text are not appred we have to do something alternative 
+Further we have prepared also the TDM (TDM is DTM (document term matrix) where words in TDM swap positions to constitute a DTM.)
+```{r}
+#Genrate a term document matrix(Terms - Row, document - Columns)#
+TDM = TermDocumentMatrix(Shark_clean_corpus)
+class(TDM)
+```
+####Convert TDM to a matrix object
+```{r}
+#Convert tdm to a matrix object #
+m1 = as.matrix(TDM)
+v1 = sort(rowSums(m1),decreasing=TRUE)
+d1 = data.frame(word = names(v1),freq=v1)
+head(d1,10)
+
+```
+Above words are having maximum frequences 
+```{r}
+# Plot a barchart of the 25 most common words
+ps_m<-as.matrix(TDM)
+term_frequency<-rowSums(ps_m)
+term_frequency<-sort(term_frequency, decreasing = TRUE)
+barplot(term_frequency[1:25],col = "steel blue", las=2)
+```
+Above we have plotted 25 most common words
+
+###Cluster analysis
+```{r}
+#Cluster analysis
+hc_df = as.data.frame(m1)
+ps_dist = dist(hc_df, method = "euclidean")
+hc = hclust(ps_dist)
+plot(hc)
+```
+
+To reduce the dimensions in TDM, we will remove less frequent words using removeSparseTerms and sparsity less than 0.95
+
+```{r}
+#Trim to study the top 50 terms
+tdm1 = TDM[names(tail(sort(rowSums(as.matrix(TDM))),50)), ]
+new_tdm<-removeSparseTerms(tdm1, sparse = 0.95)
+tdm_m = as.matrix(new_tdm)
+tdm_df = as.data.frame(tdm_m)
+ps_dist = dist(tdm_df, method = "euclidean")
+hc = hclust(ps_dist)
+plot(hc)
+dim(tdm_df)
+
+```
+###Create associations
+```{r}
+#Create associations_df#
+#install.packages(qdap)
+##library(qdap)##
+#associations <- findAssocs(new_tdm,"make",0.05)
+#associations_df <- list_vect2df(associations)[, 2:3]
+#ggplot(associations_df, aes(y = associations_df[, 1])) + 
+#  geom_point(aes(x = associations_df[,2]), 
+#             data = associations_df, size = 3) + 
+#  ggtitle("Word Associations to 'make'") + 
+#  theme_gdocs()
+```
+
+```{r}
+#Use of N-grams
+```
+
+This the fnal data set prepareatio, here we convert this dataset into data.frame and add dependant variable dealas final step 
+
+```{r}
+#Tokenize descriptions#
+Sharktokens=tokens(Shark$description,what="word",
+                    remove_numbers=TRUE,remove_punct=TRUE, remove_symbols=TRUE, remove_hyphens=TRUE)
+# Lowercase the tokens
+Sharktokens=tokens_tolower(Sharktokens)
+# remove stop words and unnecessary words
+rmwords <- c( "etc","made_usa", "also", "xxs", "xs", "s","A","An","The","y")
+Sharktokens=tokens_select(Sharktokens, stopwords(),selection = "remove")
+Sharktokens=tokens_remove(Sharktokens,rmwords)
+```
+
+```{r}
+# Stemming tokens
+Sharktokens=tokens_wordstem(Sharktokens,language = "english")
+Sharktokens=tokens_ngrams(Sharktokens,n=1:2)
+
+```
+
+```{r}
+# Creating a bag of words #
+Sharktokensdfm=dfm(Sharktokens,tolower = FALSE)
+# Remove sparsity
+SharkSparse <- convert(Sharktokensdfm, "tm")
+tm::removeSparseTerms(SharkSparse, 0.99)
+```
+
+```{r}
+# Create the dfm
+dfm_trim(Sharktokensdfm, min_docfreq = 0.2)
+x=dfm_trim(Sharktokensdfm, sparsity = 0.99)
+```
+
+```{r}
+## Setup a dataframe with features
+df=convert(x,to="data.frame")
+##Add the Y variable Recommend.IND
+Sharktokensdf=cbind(Shark$deal,df)
+names(Sharktokensdf)
+```
+### Final data set 
+```{r}
+## Cleanup names
+names(Sharktokensdf)[names(Sharktokensdf) == "Shark$deal"] <- "deal" 
+#names(Sharktokensdf)=make.names(names(Sharktokensdf))
+head(Sharktokensdf)
+## Remove the original review.text column 
+data_shark=Sharktokensdf[,-c(2)]
+data_shark$deal<-ifelse(data_shark$deal=="TRUE",1,0)
+
+```
+#Data Preparation 
+
+```{r}
+str(data_shark)
+
+```
+We observed that the final data set is contains 495 observation with 522 variables:
+
+
+####Check the proportion of data 
+```{r}
+#Check the proportion of data 
+nrow(subset(data_shark, deal == 1))/nrow(data_shark)
+set.seed(123)
+train_idx <- sample(c(1:nrow(data_shark)), round(nrow(data_shark) * 0.7,0), replace = FALSE)
+train_data <- data_shark[train_idx,]
+test_data <- data_shark[-train_idx,]
+dim(train_data)
+dim(test_data)
+
+```
+Observed that there are 50% of True values whereas the traine data consist of 346/522, and testdata set is 149/522.
+Further we are going to making the sampling balcne before preparing the modesls
+```{r}
+train.pos <- subset(train_data, deal == 1)
+train.neg <- subset(train_data, deal == 0)
+dim(train.pos)
+dim(train.neg)
+```
+
+```{r}
+## Set the seed
+set.seed(108)  
+## Take the sample subset from the major class (here negative)
+train.neg.sub_idx <- sample(c(1:nrow(train.neg)), nrow(train.pos), replace = FALSE)
+train_new <- train.neg[train.neg.sub_idx,]
+dim(train_new)
+```
+###Merge the negative and positive cases
+```{r}
+#Merge the negative and positive cases 
+train_new <- rbind(train_new, train.pos) 
+dim(train_new)
+#Rendomizing  the data
+train_new <- train_new[sample(1:nrow(train_new)),]
+```
+
+
+###Checking  the proportion of deal in the sample
+
+```{r}
+## Now check the proportion of deal in the sample
+## in train_data
+nrow(subset(train_data, deal == 1))/nrow(train_data)
+## in train.new
+nrow(subset(train_new, deal == 1))/nrow(train_new)
+str(train_new)
+test_new <- (test_data)
+
+```
+# Model Planning and Building 
+We are planning for three models as follows: 
+1. CART
+2. Logistic Regression 
+3. RandomForst 
+To predict whether investors(aka shark) will invest in the businesses we will use deal as an output variable and use the CART, logistic regression and random forest models to measure the performance and accuracy of the model.
+
+# CART Model
+###Evaluate the performance of the CART model
+```{r}
+library(rpart)
+library(rpart.plot)
+r.ctrl = rpart.control(minsplit = 100, minbucket = 10, cp = 0, xval = 10)
+DTmodel = rpart(deal ~., data = train_new, method = "class", control = r.ctrl)
+rpart.plot(DTmodel)
+DTmodel
+
+```
+
+
+```{r}
+printcp(DTmodel)
+plotcp(DTmodel)
+attributes(DTmodel)
+DTmodel$cptable
+```
+
+
+
+###Pruning the Tree: 
+```{r}
+ptree = prune(DTmodel, 0.054, "CP")
+print(ptree)
+rpart.plot(ptree)
+ptree
+DTmodel$variable.importance
+
+```
+Interpretation: 
+.	The Pruned Tree is using only one Variable, easier.  
+.	This may not be the best fit. 
+.	The Unpruned Tree uses various features earlier
+
+
+### Performance Measures  
+The following model performance measures will be calculated on entire data set to gauge the goodness of the model: 
+.	Rank Ordering 
+.	KS 
+.	Area Under Curve (AUC) 
+.	Gini Coefficient 
+.	Classification Error 
+
+```{r}
+
+#CART validation on test data
+predCART = predict(ptree, newdata = test_new, type = "class")
+predCART1 = predict(ptree, newdata = test_new, type = "prob")
+predCART1
+
+```
+
+```{r}
+## deciling code
+decile <- function(x){
+  deciles <- vector(length=10)
+  for (i in seq(0.1,1,.1)){
+    deciles[i*10] <- quantile(x, i, na.rm=T)
+  }
+  return (
+    ifelse(x<deciles[1], 1,
+           ifelse(x<deciles[2], 2,
+                  ifelse(x<deciles[3], 3,
+                         ifelse(x<deciles[4], 4,
+                                ifelse(x<deciles[5], 5,
+                                       ifelse(x<deciles[6], 6,
+                                              ifelse(x<deciles[7], 7,
+                                                     ifelse(x<deciles[8], 8,
+                                                            ifelse(x<deciles[9], 9, 10
+                                                            ))))))))))
+}
+
+## deciling
+test_new$deciles <- decile(predCART1[,2])
+test_new$deal<- as.numeric(test_new$deal)
+```
+
+
+###Model Performance Measure - Rank Ordering 
+```{r}
+# Rank 
+library(data.table)
+library(scales)
+tmp_TS = data.table(test_new)
+c_rank <- tmp_TS[, list(
+ cnt = length(deal), 
+ cnt_resp = sum(deal), 
+cnt_non_resp = sum(test_new$deal== 0)) , 
+ by= deciles][order(- deciles)]
+c_rank$rrate <- round (c_rank$cnt_resp / c_rank$cnt,2);
+c_rank$cum_resp <- cumsum(c_rank$cnt_resp)
+c_rank$cum_non_resp <- cumsum(c_rank$cnt_non_resp)
+c_rank$cum_rel_resp <- round(c_rank$cum_resp / sum(c_rank$cnt_resp),2);
+c_rank$cum_rel_non_resp <- round(c_rank$cum_non_resp / sum(c_rank$cnt_non_resp),2);
+c_rank$ks <- abs(c_rank$cum_rel_resp - c_rank$cum_rel_non_resp);
+
+library(scales)
+c_rank$rrate <- percent(c_rank$rrate)
+c_rank$cum_rel_resp <- percent(c_rank$cum_rel_resp)
+c_rank$cum_rel_non_resp <- percent(c_rank$cum_rel_non_resp)
+
+print(c_rank)
+```
+Interpretation: 
+.	The baseline Response Rate is 54.%. 
+.	The KS is above 0%, indicating it to be a not very poor model but still need to anlyisi some other accucracy 
+
+```{r}
+#install.packages("ROCR")
+library(ROCR)
+#Validation on test data
+DTpredROC1 = ROCR::prediction(predCART1[,2], test_new$deal)
+perf1<-ROCR::performance(DTpredROC1,"tpr","fpr")
+plot(perf1)
+plot(perf1,col="red", main="Parameters_ROC")
+abline(0,1, lty = 8, col = "grey")
+
+```
+Above Graphical representation of the Area Under Curve is as follows: 
+
+###Model Performance Measure - KS , Area under Curve & Gini
+```{r}
+##install.packages("ineq")
+library(ineq)
+#KS on train
+KS <- max(attr(perf1, 'y.values')[[1]]-attr(perf1, 'x.values')[[1]])
+KS
+auc <- as.numeric(ROCR::performance(DTpredROC1, "auc")@y.values)
+auc
+#gini
+gini = ineq(predCART1[,2], type="Gini")
+gini
+
+
+```
+Above we found The AUC value around 49% indicates the good performance of the model. 
+
+
+### Model Performance Measure - Confusion Matrix 
+
+```{r}
+with(test_new,table(deal,predCART))
+
+(78+2)/(67+2)
+
+```
+Classification Error Rate = 1- Accuracy = is around 80%
+The lower the classification error rate, higher the model accuracy, resulting in a better model.  
+So this not good model accoridng Classification Error Rate
+
+#Random Forest 
+###The initial build & Optimal No of Trees 
+
+```{r}
+# Random forest#
+dim(train_new)
+colnames(train_new) <- paste(colnames(train_new), "_c", sep = "")
+colnames(test_new) <- paste(colnames(test_new), "_c", sep = "")
+colnames(train_new)[1] <- 'deal' 
+colnames(test_new)[1] <- 'deal' 
+train_new$deal=factor(train_new$deal)
+library(randomForest) 
+seed=112
+set.seed(seed)
+RFmodel = randomForest(deal ~ ., data = train_new, mtry = 7, nodesize = 10, ntree = 501, importance = TRUE)
+print(RFmodel)
+
+```
+
+
+```{r}
+
+plot(RFmodel, main="")        
+ legend("topright", c("OOB", "0", "1"), text.col=1:6, lty=1:3, col=1:3)
+  title(main="Error Rates Random Forest train_data")
+
+```
+
+```{r}
+rf_err_rate <- RFmodel$err.rate
+rf_err_rate$ID <- seq.int(nrow(rf_err_rate)) 
+```
+It is observed that as the number of tress increases, the OOB error rate starts decreasing with OOB = 0.076 (the minimum value). 
+
+### Variable Importance 
+To understand the important variables in Random Forest, the following measures are generally used:  
+Mean Decrease in Accuracy is based on permutation  o Randomly permute values of a variable for which importance is to be computed in the OOB sample  
+Compute the Error Rate with permuted values  o Compute decrease in OOB Error rate (Permuted - Not permuted)  o Average the decrease over all the trees  
+Mean Decrease in Gini is computed as "total decrease in node impurities from splitting on the variable, averaged over all trees"  
+ 
+The variables importance is computed as follows: 
+
+```{r}
+## List the importance of the variables.
+impVar <- round(randomForest::importance(RFmodel), 2)
+impVar[order(impVar[,1],decreasing = TRUE),]
+```
+
+
+
+#Optimal value - mtry value 
+In the random forests literature, the number of variables available for splitting at each tree node is referred to as the mtry parameter. 
+The optimum number of variables is obtained using tuneRF function in test data set as follows
+
+ Above mtry = 4 	OOB error = 46% (Output: OOB Error Vs Mtry) 
+
+```{r}
+
+tune_rf_model <- tuneRF(x =train_new[,-c(1)],
+              y=as.factor(train_new$deal),
+              mtryStart = 3, 
+              ntreeTry= 100, 
+              stepFactor = 1.5, 
+              improve = 0.0001, 
+              trace=TRUE, 
+              plot = TRUE,
+              doBest = TRUE,
+              nodesize = 10, 
+              importance=TRUE
+)
+
+#Validate RF model on test data
+test_new$predict.class <- predict(tune_rf_model, test_new, type="class")
+test_new$predict.score <- predict(tune_rf_model, test_new, type="prob")
+
+```
+
+
+
+```{r}
+#Checking Variable Importance
+varImpPlot(tune_rf_model) 
+```
+
+```{r}
+# deciling
+decile <- function(x){
+  deciles <- vector(length=10)
+  for (i in seq(0.1,1,.1)){
+    deciles[i*10] <- quantile(x, i, na.rm=T)
+  }
+  return (
+    ifelse(x<deciles[1], 1,
+           ifelse(x<deciles[2], 2,
+                  ifelse(x<deciles[3], 3,
+                         ifelse(x<deciles[4], 4,
+                                ifelse(x<deciles[5], 5,
+                                       ifelse(x<deciles[6], 6,
+                                              ifelse(x<deciles[7], 7,
+                                                     ifelse(x<deciles[8], 8,
+                                                            ifelse(x<deciles[9], 9, 10
+                                                            ))))))))))
+}
+
+
+test_new$deciles <- decile(test_new$predict.score[,2])
+class(test_new$predict.score)
+
+```
+
+```{r}
+library(tidyverse)
+library(magrittr)
+#train_data[, 1] <- as.numeric(as.character( train_data[, 1] ))
+#test_data[, 1] <- as.numeric(as.character( test_data[, 1]))
+colnames(test_new)[1] <- 'deal'  
+library(data.table)
+library(scales)
+
+
+```
+###Model Performance Measure - Rank Ordering 
+```{r}
+tmp_DT = data.table(test_new)
+rank <- tmp_DT[, list(
+  cnt = length(deal), 
+  cnt_resp = sum(deal), 
+  cnt_non_resp = sum(test_new$deal== 0)) , 
+  by= deciles][order(- deciles)]
+rank$rrate <- round (rank$cnt_resp / rank$cnt,2);
+rank$cum_resp <- cumsum(rank$cnt_resp)
+rank$cum_non_resp <- cumsum(rank$cnt_non_resp)
+rank$cum_rel_resp <- round(rank$cum_resp / sum(rank$cnt_resp),2);
+rank$cum_rel_non_resp <- round(rank$cum_non_resp / sum(rank$cnt_non_resp),2);
+rank$ks <- abs(rank$cum_rel_resp - rank$cum_rel_non_resp);
+library(scales)
+rank$rrate <- percent(rank$rrate)
+rank$cum_rel_resp <- percent(rank$cum_rel_resp)
+rank$cum_rel_non_resp <- percent(rank$cum_rel_non_resp)
+
+View(rank)
+```
+
+```{r}
+#test_data[, 1] <- as.numeric(as.character( test_data[, 1]))
+#colnames(test_data)[1] <- 'deal'  
+
+library(ROCR)
+library(ineq) 
+pred <- prediction(test_new$predict.score[,2], test_new$deal)
+perf<-ROCR::performance(pred,"tpr","fpr")
+plot(perf,col="red", main="parameters_ROC")
+abline(0,1, lty = 8, col = "grey")
+```
+###Model Performance Measure - KS and Area under Curve 
+```{r}
+KS <- max(attr(perf, 'y.values')[[1]]-attr(perf, 'x.values')[[1]])
+KS
+
+## Area Under Curve
+auc <-ROCR:: performance(pred,"auc"); 
+auc <- as.numeric(auc@y.values)
+auc
+
+## Gini Coefficient
+library(ineq)
+gini = ineq(test_new$predict.score[,2], type="Gini")
+gini
+
+## Classification Error
+with(test_new,table(deal, predict.class))
+```
+####Logstic Regiressin Model 
+```{r}
+#Logstic regiressin 
+# partition the data
+set.seed(1000)
+library(dplyr)
+library(caTools)
+spl = sample.split(data_shark$deal, SplitRatio=0.70)
+train = subset(data_shark, spl ==T)
+test = subset(data_shark, spl==F)
+dim(train)
+```
+### Summary  Logitst 
+
+```{r}
+# create a model
+LRmodel = glm(deal ~ ., data = train, family = binomial)
+summary(LRmodel)
+
+```
+####Validate the model
+```{r}
+#Validate the model
+predTest = predict(LRmodel, newdata = test, type="response")
+table(test$deal, predTest>0.3)
+(73+75)/nrow(na.omit(test))
+```
+
+```{r}
+library(ROCR)
+ROCRpred = prediction(predTest, test$deal)
+as.numeric(performance(ROCRpred, "auc")@y.values)
+perf = performance(ROCRpred, "tpr","fpr")
+plot(perf)
+
+```
+# Adding Ratio in the data set
+
+Now let's add additional variable called as Ratio which will be derived using column askfor/valuation and then we will re-run the models to see if we can have improved accuracy in the models
+
+```{r}
+#Adding Ratio in the data set#
+names(Shark)
+ratio_data <- subset(Shark, select = c(8,10))
+ratio <- as.integer(ratio_data$askedFor/ratio_data$valuation*100)
+ratio
+str(data_shark)
+shark_data2 = cbind(data_shark$deal,ratio,data_shark)
+data_shark1=shark_data2[,-c(3)]
+names(data_shark1)[names(data_shark1) == "data_shark$deal"] <- "deal" 
+
+
+```
+#Rebuild Model
+```{r}
+#Rebuild Model #
+
+### Check the proportion of data #
+nrow(subset(data_shark1, deal == 1))/nrow(data_shark1)
+#Partition the data into two parts Train and Test
+set.seed(3000)
+split = sample.split(data_shark1$deal, SplitRatio=0.7)
+train_data1 = subset(data_shark1, split==T)
+test_data1 = subset(data_shark1, split==F)
+
+```
+
+```{r}
+#CART#
+library(rpart)
+library(rpart.plot)
+test_data1$deal = as.factor(test_data1$deal)
+train_data1$deal = as.factor(train_data1$deal)
+
+```
+
+```{r}
+r.ctrl1 = rpart.control(minsplit = 100, minbucket = 10, cp = 0, xval = 10)
+DTmodel1 = rpart(deal ~., data = train_data1, method = "class", control = r.ctrl1)
+#CART Diagram
+rpart.plot(DTmodel1)
+DTmodel1
+```
+
+```{r}
+printcp(DTmodel1)
+plotcp(DTmodel1)
+```
+
+
+```{r}
+attributes(DTmodel1)
+DTmodel1$cptable
+
+```
+
+```{r}
+ptree1 = prune(DTmodel1, 0.054, "CP")
+print(ptree1)
+rpart.plot(ptree1)
+ptree1
+DTmodel1$variable.importance
+```
+
+```{r}
+#CART validation on test data
+str(test_data1)
+predCART2 = predict(ptree1, newdata = test_data1, type = "class")
+predCART3 = predict(ptree1, newdata = test_data1, type = "prob")
+predCART3
+
+```
+
+```{r}
+## deciling code
+decile <- function(x){
+  deciles <- vector(length=10)
+  for (i in seq(0.1,1,.1)){
+    deciles[i*10] <- quantile(x, i, na.rm=T)
+  }
+  return (
+    ifelse(x<deciles[1], 1,
+           ifelse(x<deciles[2], 2,
+                  ifelse(x<deciles[3], 3,
+                         ifelse(x<deciles[4], 4,
+                                ifelse(x<deciles[5], 5,
+                                       ifelse(x<deciles[6], 6,
+                                              ifelse(x<deciles[7], 7,
+                                                     ifelse(x<deciles[8], 8,
+                                                            ifelse(x<deciles[9], 9, 10
+                                                            ))))))))))
+}
+
+
+## deciling
+test_data1$deciles <- decile(predCART3[,2])
+test_data1$deal<- as.numeric(test_data1$deal)
+str(test_data1)
+```
+
+```{r}
+tmp_TS1 = data.table(test_data1)
+n_rank <- tmp_TS1[, list(
+  cnt = length(deal), 
+  cnt_resp = sum(deal), 
+  cnt_non_resp = sum(test_new$deal== 0)) , 
+  by= deciles][order(- deciles)]
+n_rank$rrate <- round (n_rank$cnt_resp / n_rank$cnt,2);
+n_rank$cum_resp <- cumsum(n_rank$cnt_resp)
+n_rank$cum_non_resp <- cumsum(n_rank$cnt_non_resp)
+n_rank$cum_rel_resp <- round(n_rank$cum_resp / sum(n_rank$cnt_resp),2);
+n_rank$cum_rel_non_resp <- round(n_rank$cum_non_resp / sum(n_rank$cnt_non_resp),2);
+n_rank$ks <- abs(n_rank$cum_rel_resp - n_rank$cum_rel_non_resp);
+
+library(scales)
+n_rank$rrate <- percent(n_rank$rrate)
+n_rank$cum_rel_resp <- percent(n_rank$cum_rel_resp)
+n_rank$cum_rel_non_resp <- percent(n_rank$cum_rel_non_resp)
+
+print(n_rank)
+```
+
+```{r}
+#install.packages("ROCR")
+library(ROCR)
+#Validation on test data
+DTpredROC1_new = ROCR::prediction(predCART3[,2], test_data1$deal)
+perf1_new<-ROCR::performance(DTpredROC1_new,"tpr","fpr")
+plot(perf1_new)
+plot(perf1_new,col="red", main="Parameters_ROC")
+abline(0,1, lty = 8, col = "grey")
+```
+
+```{r}
+##install.packages("ineq")
+library(ineq)
+#KS 
+KS <- max(attr(perf1_new, 'y.values')[[1]]-attr(perf1_new, 'x.values')[[1]])
+KS
+auc <- as.numeric(ROCR::performance(DTpredROC1_new, "auc")@y.values)
+auc
+#gini
+gini = ineq(predCART3[,2], type="Gini")
+gini
+
+with(test_data1,table(deal,predCART2))
+
+```
+# Random forest
+```{r}
+# Random forest#
+str(train_data1)
+dim(train_data1)
+str(train_data1)
+colnames(train_data1) <- paste(colnames(train_data1), "_c", sep = "")
+colnames(test_data1) <- paste(colnames(test_data1), "_c", sep = "")
+colnames(train_data1)[1] <- 'deal' 
+colnames(test_data1)[1] <- 'deal' 
+train_data1$deal=as.factor(train_data1$deal)
+library(randomForest) 
+seed=112
+set.seed(seed)
+RFmodel_new = randomForest(deal ~ ., data = train_data1, mtry = 3, nodesize = 7, ntree = 501, importance = TRUE)
+print(RFmodel_new)
+```
+
+```{r}
+plot(RFmodel_new, main="")        
+legend("topright", c("OOB", "0", "1"), text.col=1:6, lty=1:3, col=1:3)
+title(main="Error Rates Random Forest train_data")
+```
+
+```{r}
+RFmodel_new$err.rate
+rf_err_rate_new <- RFmodel_new$err.rate
+rf_err_rate$ID <- seq.int(nrow(rf_err_rate_new)) 
+
+```
+
+```{r}
+## List the importance of the variables.
+impVar1 <- round(randomForest::importance(RFmodel_new), 2)
+impVar1[order(impVar1[,1],decreasing = TRUE),]
+
+
+tune_rf_model_new <- tuneRF(x = test_data1[,-c(1)],
+                        y=as.factor(test_data1$deal),
+                        mtryStart = 3, 
+                        ntreeTry=100, 
+                        stepFactor = 1.5, 
+                        improve = 0.0001, 
+                        trace=TRUE, 
+                        plot = TRUE,
+                        doBest = TRUE,
+                        nodesize = 10, 
+                        importance=TRUE
+)
+
+
+```
+
+```{r}
+#Validate RF model on test data
+test_data1$predict.class <- predict(tune_rf_model_new, test_data1, type="class")
+test_data1$predict.score <- predict(tune_rf_model_new, test_data1, type="prob")
+
+```
+
+```{r}
+#Checking Variable Importance
+varImpPlot(tune_rf_model_new) 
+```
+
+```{r}
+# deciling
+decile <- function(x){
+  deciles <- vector(length=10)
+  for (i in seq(0.1,1,.1)){
+    deciles[i*10] <- quantile(x, i, na.rm=T)
+  }
+  return (
+    ifelse(x<deciles[1], 1,
+           ifelse(x<deciles[2], 2,
+                  ifelse(x<deciles[3], 3,
+                         ifelse(x<deciles[4], 4,
+                                ifelse(x<deciles[5], 5,
+                                       ifelse(x<deciles[6], 6,
+                                              ifelse(x<deciles[7], 7,
+                                                     ifelse(x<deciles[8], 8,
+                                                            ifelse(x<deciles[9], 9, 10
+                                                            ))))))))))
+}
+
+
+test_data1$deciles <- decile(test_data1$predict.score[,2])
+class(test_data1$predict.score)
+```
+
+```{r}
+library(tidyverse)
+library(magrittr)
+#train_data1[, 1] <- as.numeric(as.character( train_data1[, 1] ))
+#test_data1[, 1] <- as.numeric(as.character( test_data1[, 1]))
+#colnames(test_data1)[1] <- 'deal' 
+#colnames(train_data1)[1] <- 'deal'  
+library(data.table)
+library(scales)
+tmp_DT = data.table(test_data1)
+rank <- tmp_DT[, list(
+  cnt = length(deal), 
+  cnt_resp = sum(deal), 
+  cnt_non_resp = sum(deal == 0)) , 
+  by=deciles][order(-deciles)]
+rank$rrate <- round (rank$cnt_resp / rank$cnt,4);
+rank$cum_resp <- cumsum(rank$cnt_resp)
+rank$cum_non_resp <- cumsum(rank$cnt_non_resp)
+rank$cum_rel_resp <- round(rank$cum_resp / sum(rank$cnt_resp),4);
+rank$cum_rel_non_resp <- round(rank$cum_non_resp /sum(rank$cnt_non_resp),4);
+rank$ks <- abs(rank$cum_rel_resp - rank$cum_rel_non_resp);
+
+library(scales)
+rank$rrate <- percent(rank$rrate)
+rank$cum_rel_resp <- percent(rank$cum_rel_resp)
+#rank$cum_rel_non_resp <- percent(rank$cum_rel_non_resp)
+
+View(rank)
+```
+
+```{r}
+#test_data[, 1] <- as.numeric(as.character( test_data[, 1]))
+#colnames(test_data)[1] <- 'deal'  
+
+library(ROCR)
+library(ineq) 
+pred_RF <- prediction(test_data1$predict.score[,2], test_data1$deal)
+perf_new_RF<-ROCR::performance(pred_RF,"tpr","fpr")
+plot(perf_new_RF,col="red", main="parameters_ROC")
+abline(0,1, lty = 8, col = "grey")
+
+```
+
+```{r}
+KS <- max(attr(perf_new_RF, 'y.values')[[1]]-attr(perf_new_RF, 'x.values')[[1]])
+KS
+
+## Area Under Curve
+auc <-ROCR:: performance(pred_RF,"auc"); 
+auc <- as.numeric(auc@y.values)
+auc
+
+## Gini Coefficient
+library(ineq)
+gini = ineq(test_data1$predict.score[,2], type="Gini")
+gini
+
+## Classification Error
+with(test_data1,table(deal, predict.class))
+
+```
+#Logstic regiress
+```{r}
+#Logstic regiress
+str(data_shark1)
+summary (data_shark1)
+# partition the data
+set.seed(1000)
+library(dplyr)
+library(caTools)
+spl = sample.split(data_shark1$deal, SplitRatio=0.70)
+train1 = subset(data_shark1, spl ==T)
+test1 = subset(data_shark1, spl==F)
+dim(train1)
+```
+
+```{r}
+# create a model
+LRmodel_new = glm(deal ~ ., data = train1, family = binomial)
+summary(LRmodel_new)
+```
+
+```{r}
+#Validate the model
+predTest1 = predict(LRmodel_new, newdata = test1, type="response")
+table(test1$deal, predTest1>0.3)
+(78+70)/nrow(na.omit(test1))
+```
+
+```{r}
+library(ROCR)
+ROCRpred1 = prediction(predTest1, test1$deal)
+as.numeric(performance(ROCRpred1, "auc")@y.values)
+perf = performance(ROCRpred1, "tpr","fpr")
+plot(perf)
+
+```
+
